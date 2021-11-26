@@ -3,8 +3,6 @@ import {
   BeforeInsert,
   CreateDateColumn,
   UpdateDateColumn,
-  Check,
-  Index,
   Column,
   PrimaryColumn,
   ManyToOne,
@@ -13,29 +11,28 @@ import {
 import { ulid } from "ulid"
 import { resolveDbType, DbAwareColumn } from "../utils/db-aware-column"
 
-import { LineItem } from "./line-item"
+import { Region } from "./region"
 
 @Entity()
-export class TaxLine {
+export class TaxRate {
   @PrimaryColumn()
   id: string
 
-  @Index()
   @Column()
-  item_id: string
-
-  @ManyToOne(() => LineItem, (li) => li.tax_lines)
-  @JoinColumn({ name: "item_id" })
-  item: LineItem
+  rate: number
 
   @Column({ nullable: true })
-  rate: number
+  code: string
 
   @Column()
   name: string
 
   @Column()
-  code: string
+  region_id: string
+
+  @ManyToOne(() => Region)
+  @JoinColumn({ name: "region_id" })
+  region: Region
 
   @CreateDateColumn({ type: resolveDbType("timestamptz") })
   created_at: Date
@@ -50,20 +47,32 @@ export class TaxLine {
   private beforeInsert() {
     if (this.id) return
     const id = ulid()
-    this.id = `tl_${id}`
+    this.id = `trate_${id}`
   }
 }
 
 /**
- * @schema tax_line
- * title: "Tax Line"
- * description: "Line item that specifies an amount of tax to add to a line item."
- * x-resourceId: tax_line
+ * @schema line_item
+ * title: "Line Item"
+ * description: "Line Items represent purchasable units that can be added to a Cart for checkout. When Line Items are purchased they will get copied to the resulting order and can eventually be referenced in Fulfillments and Returns. Line Items may also be created when processing Swaps and Claims."
+ * x-resourceId: line_item
  * properties:
  *   id:
- *     description: "The id of the Tax Line. This value will be prefixed by `tl_`."
+ *     description: "The id of the Line Item. This value will be prefixed by `item_`."
  *     type: string
- *   code:
+ *   cart_id:
+ *     description: "The id of the Cart that the Line Item belongs to."
+ *     type: string
+ *   order_id:
+ *     description: "The id of the Order that the Line Item belongs to."
+ *     type: string
+ *   swap_id:
+ *     description: "The id of the Swap that the Line Item belongs to."
+ *     type: string
+ *   claim_order_id:
+ *     description: "The id of the Claim that the Line Item belongs to."
+ *     type: string
+ *   title:
  *     description: "The title of the Line Item, this should be easily identifiable by the Customer."
  *     type: string
  *   description:
