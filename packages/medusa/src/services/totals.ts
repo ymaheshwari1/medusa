@@ -16,9 +16,9 @@ class TotalsService extends BaseService {
    * @param {object} object - object to calculate total for
    * @return {int} the calculated subtotal
    */
-  getTotal(object) {
+  async getTotal(object): Promise<number> {
     const subtotal = this.getSubtotal(object)
-    const taxTotal = this.getTaxTotal(object)
+    const taxTotal = await this.getTaxTotal(object)
     const discountTotal = this.getDiscountTotal(object)
     const giftCardTotal = this.getGiftCardTotal(object)
     const shippingTotal = this.getShippingTotal(object)
@@ -26,7 +26,7 @@ class TotalsService extends BaseService {
     return subtotal + taxTotal + shippingTotal - discountTotal - giftCardTotal
   }
 
-  getPaidTotal(order) {
+  getPaidTotal(order): number {
     const total = order.payments?.reduce((acc, next) => {
       acc += next.amount
       return acc
@@ -35,7 +35,7 @@ class TotalsService extends BaseService {
     return total
   }
 
-  getSwapTotal(order) {
+  getSwapTotal(order): number {
     let swapTotal = 0
     if (order.swaps && order.swaps.length) {
       for (const s of order.swaps) {
@@ -52,7 +52,7 @@ class TotalsService extends BaseService {
    * @param {Object} opts - options
    * @return {int} the calculated subtotal
    */
-  getSubtotal(object, opts = {}) {
+  getSubtotal(object, opts = {}): number {
     let subtotal = 0
     if (!object.items) {
       return subtotal
@@ -76,7 +76,7 @@ class TotalsService extends BaseService {
    * @param {Cart | Object} object - cart or order to calculate subtotal for
    * @return {int} shipping total
    */
-  getShippingTotal(object) {
+  getShippingTotal(object): number {
     const { shipping_methods } = object
     return shipping_methods.reduce((acc, next) => {
       return acc + next.price
@@ -89,7 +89,7 @@ class TotalsService extends BaseService {
    * @param {Cart | Object} object - cart or order to calculate subtotal for
    * @return {int} tax total
    */
-  getTaxTotal(object) {
+  async getTaxTotal(object): Promise<number> {
     const subtotal = this.getSubtotal(object)
     const shippingTotal = this.getShippingTotal(object)
     const discountTotal = this.getDiscountTotal(object)
@@ -104,7 +104,7 @@ class TotalsService extends BaseService {
     )
   }
 
-  getRefundedTotal(object) {
+  getRefundedTotal(object): number {
     if (!object.refunds) {
       return 0
     }
@@ -113,7 +113,7 @@ class TotalsService extends BaseService {
     return this.rounded(total)
   }
 
-  getLineItemRefund(object, lineItem) {
+  getLineItemRefund(object, lineItem): number {
     const { discounts } = object
     const tax_rate =
       typeof object.tax_rate !== "undefined"
@@ -148,7 +148,7 @@ class TotalsService extends BaseService {
    * @param {[LineItem]} lineItems -
    * @return {int} the calculated subtotal
    */
-  getRefundTotal(order, lineItems) {
+  getRefundTotal(order, lineItems): number {
     let itemIds = order.items.map((i) => i.id)
 
     // in case we swap a swap, we need to include swap items
@@ -307,7 +307,7 @@ class TotalsService extends BaseService {
     return merged.map((i) => ({ item: i, amount: 0 }))
   }
 
-  getGiftCardTotal(cart) {
+  getGiftCardTotal(cart): number {
     const giftCardable = this.getSubtotal(cart) - this.getDiscountTotal(cart)
 
     if (cart.gift_card_transactions) {
@@ -334,7 +334,7 @@ class TotalsService extends BaseService {
    * @param {Cart} cart - the cart to calculate discounts for
    * @return {int} the total discounts amount
    */
-  getDiscountTotal(cart) {
+  getDiscountTotal(cart): number {
     const subtotal = this.getSubtotal(cart, { excludeNonDiscounts: true })
 
     if (!cart.discounts || !cart.discounts.length) {
@@ -381,7 +381,7 @@ class TotalsService extends BaseService {
     return this.rounded(Math.min(subtotal, toReturn))
   }
 
-  rounded(value) {
+  rounded(value): number {
     return Math.round(value)
   }
 }

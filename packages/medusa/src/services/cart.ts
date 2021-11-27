@@ -1,6 +1,53 @@
 import _ from "lodash"
+import { EntityManager } from "typeorm"
 import { MedusaError, Validator } from "medusa-core-utils"
 import { BaseService } from "medusa-interfaces"
+
+import { ShippingMethodRepository } from "../repositories/shipping-method"
+import { CartRepository } from "../repositories/cart"
+import { AddressRepository } from "../repositories/address"
+import { PaymentSessionRepository } from "../repositories/payment-session"
+
+import { Region } from "../models/region"
+import { Cart } from "../models/cart"
+
+import { FindConfig } from "../types/common"
+import { FilterableCartProps, TotalsField, TotaledCart } from "../types/cart"
+
+import EventBusService from "./event-bus"
+import ProductVariantService from "./product-variant"
+import ProductService from "./product"
+import RegionService from "./region"
+import LineItemService from "./line-item"
+import PaymentProviderService from "./payment-provider"
+import ShippingOptionService from "./shipping-option"
+import CustomerService from "./customer"
+import DiscountService from "./discount"
+import GiftCardService from "./gift-card"
+import TotalsService from "./totals"
+import InventoryService from "./inventory"
+import CustomShippingOptionService from "./custom-shipping-option"
+
+type CartConstructorProps = {
+  manager: EntityManager
+  cartRepository: typeof CartRepository
+  shippingMethodRepository: typeof ShippingMethodRepository
+  addressRepository: typeof AddressRepository
+  paymentSessionRepository: typeof PaymentSessionRepository
+  eventBusService: EventBusService
+  paymentProviderService: PaymentProviderService
+  productService: ProductService
+  productVariantService: ProductVariantService
+  regionService: RegionService
+  lineItemService: LineItemService
+  shippingOptionService: ShippingOptionService
+  customerService: CustomerService
+  discountService: DiscountService
+  giftCardService: GiftCardService
+  totalsService: TotalsService
+  inventoryService: InventoryService
+  customShippingOptionService: CustomShippingOptionService
+}
 
 /* Provides layer to manipulate carts.
  * @implements BaseService
@@ -11,6 +58,25 @@ class CartService extends BaseService {
     CREATED: "cart.created",
     UPDATED: "cart.updated",
   }
+
+  private manager_: EntityManager
+  private shippingMethodRepository_: typeof ShippingMethodRepository
+  private cartRepository_: typeof CartRepository
+  private eventBus_: EventBusService
+  private productVariantService_: ProductVariantService
+  private productService_: ProductService
+  private regionService_: RegionService
+  private lineItemService_: LineItemService
+  private paymentProviderService_: PaymentProviderService
+  private customerService_: CustomerService
+  private shippingOptionService_: ShippingOptionService
+  private discountService_: DiscountService
+  private giftCardService_: GiftCardService
+  private totalsService_: TotalsService
+  private addressRepository_: typeof AddressRepository
+  private paymentSessionRepository_: typeof PaymentSessionRepository
+  private inventoryService_: InventoryService
+  private customShippingOptionService_: CustomShippingOptionService
 
   constructor({
     manager,
@@ -31,7 +97,7 @@ class CartService extends BaseService {
     paymentSessionRepository,
     inventoryService,
     customShippingOptionService,
-  }) {
+  }: CartConstructorProps) {
     super()
 
     /** @private @const {EntityManager} */
@@ -89,7 +155,7 @@ class CartService extends BaseService {
     this.customShippingOptionService_ = customShippingOptionService
   }
 
-  withTransaction(transactionManager) {
+  withTransaction(transactionManager: EntityManager): CartService {
     if (!transactionManager) {
       return this
     }
@@ -139,7 +205,9 @@ class CartService extends BaseService {
    * @typedef {LineItemContent[]} LineItemContentArray
    */
 
-  transformQueryForTotals_(config) {
+  transformQueryForTotals_(
+    config: FindConfig<Cart>
+  ): FindConfig<Cart> & { totalsToSelect: string[] } {
     let { select, relations } = config
 
     if (!select) {
@@ -184,26 +252,15 @@ class CartService extends BaseService {
     }
   }
 
-  async decorateTotals_(cart, totalsFields = []) {
-    if (totalsFields.includes("shipping_total")) {
-      cart.shipping_total = await this.totalsService_.getShippingTotal(cart)
-    }
-    if (totalsFields.includes("discount_total")) {
-      cart.discount_total = await this.totalsService_.getDiscountTotal(cart)
-    }
-    if (totalsFields.includes("tax_total")) {
-      cart.tax_total = await this.totalsService_.getTaxTotal(cart)
-    }
-    if (totalsFields.includes("gift_card_total")) {
-      cart.gift_card_total = await this.totalsService_.getGiftCardTotal(cart)
-    }
-    if (totalsFields.includes("subtotal")) {
-      cart.subtotal = await this.totalsService_.getSubtotal(cart)
-    }
-    if (totalsFields.includes("total")) {
-      cart.total = await this.totalsService_.getTotal(cart)
-    }
-    return cart
+  async decorateTotals_(cart: Cart): Promise<TotaledCart> {
+    cart.shipping_total = this.totalsService_.getShippingTotal(cart)
+    cart.discount_total = this.totalsService_.getDiscountTotal(cart)
+    cart.tax_total = await this.totalsService_.getTaxTotal(cart)
+    cart.gift_card_total = this.totalsService_.getGiftCardTotal(cart)
+    cart.subtotal = this.totalsService_.getSubtotal(cart)
+    cart.total = await this.totalsService_.getTotal(cart)
+
+    return cart as TotaledCart
   }
 
   /**
@@ -211,22 +268,14 @@ class CartService extends BaseService {
    * @param {Object} config - config object
    * @return {Promise} the result of the find operation
    */
-  list(selector, config = {}) {
+  async list(
+    selector: FilterableCartProps,
+    config: FindConfig<Cart> = {}
+  ): Promise<Cart[]> {
     const cartRepo = this.manager_.getCustomRepository(this.cartRepository_)
 
-    const query = {
-      where: selector,
-    }
-
-    if (config.select) {
-      query.select = config.select
-    }
-
-    if (config.relations) {
-      query.relations = config.relations
-    }
-
-    return cartRepo.find(query)
+    const query = this.buildQuery_(selector, config)
+    return await cartRepo.find(query)
   }
 
   /**
@@ -235,16 +284,19 @@ class CartService extends BaseService {
    * @param {Object} options - the options to get a cart
    * @return {Promise<Cart>} the cart document.
    */
-  async retrieve(cartId, options = {}) {
+  async retrieve(
+    cartId: string,
+    options: FindConfig<Cart> = {}
+  ): Promise<Cart> {
     const cartRepo = this.manager_.getCustomRepository(this.cartRepository_)
     const validatedId = this.validateId_(cartId)
 
-    const { select, relations, totalsToSelect } =
-      this.transformQueryForTotals_(options)
+    const { select, relations } = this.transformQueryForTotals_(options)
 
-    const query = {
-      where: { id: validatedId },
-    }
+    const query = this.buildQuery_(
+      { id: validatedId },
+      { ...options, select, relations }
+    )
 
     if (relations && relations.length > 0) {
       query.relations = relations
@@ -265,7 +317,7 @@ class CartService extends BaseService {
       )
     }
 
-    const cart = await this.decorateTotals_(raw, totalsToSelect)
+    const cart = await this.decorateTotals_(raw)
     return cart
   }
 
@@ -274,7 +326,7 @@ class CartService extends BaseService {
    * @param {Object} data - the data to create the cart with
    * @return {Promise} the result of the create operation
    */
-  async create(data) {
+  async create(data: Partial<Cart>): Promise<Cart> {
     return this.atomicPhase_(async (manager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
       const addressRepo = manager.getCustomRepository(this.addressRepository_)

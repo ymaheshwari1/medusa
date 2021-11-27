@@ -244,14 +244,14 @@ export class Cart {
   context: any
 
   // Total fields
-  shipping_total: number
-  discount_total: number
-  tax_total: number
-  refunded_total: number
-  total: number
-  subtotal: number
-  refundable_amount: number
-  gift_card_total: number
+  shipping_total?: number
+  discount_total?: number
+  tax_total?: number
+  refunded_total?: number
+  total?: number
+  subtotal?: number
+  refundable_amount?: number
+  gift_card_total?: number
 
   @BeforeInsert()
   private beforeInsert(): undefined | void {
