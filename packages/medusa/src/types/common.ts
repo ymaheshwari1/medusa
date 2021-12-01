@@ -8,8 +8,8 @@ export type PartialPick<T, K extends keyof T> = {
   [P in K]?: T[P]
 }
 
-export interface FindConfig<Entity> {
-  select?: (keyof Entity)[]
+export interface FindConfig<T> {
+  select?: (keyof T)[]
   skip?: number
   take?: number
   relations?: string[]

@@ -217,7 +217,7 @@ export class Cart {
   shipping_methods: ShippingMethod[]
 
   @DbAwareColumn({ type: "enum", enum: CartType, default: "default" })
-  type: boolean
+  type: CartType
 
   @Column({ type: resolveDbType("timestamptz"), nullable: true })
   completed_at: Date
@@ -243,7 +243,6 @@ export class Cart {
   @DbAwareColumn({ type: "jsonb", nullable: true })
   context: any
 
-  // Total fields
   shipping_total?: number
   discount_total?: number
   tax_total?: number

@@ -8,7 +8,7 @@ import {
   StringComparisonOperator,
 } from "./common"
 
-export type TotalsField =
+export type TotalField =
   | "shipping_total"
   | "discount_total"
   | "tax_total"
@@ -22,10 +22,10 @@ export class TotaledCart extends Cart {
   shipping_total: number
   discount_total: number
   tax_total: number
-  refunded_total: number
+  refunded_total?: number
   total: number
   subtotal: number
-  refundable_amount: number
+  refundable_amount?: number
   gift_card_total: number
 }
 
@@ -55,12 +55,26 @@ class Discount {
   code: string
 }
 
+export type CartCreateProps = {
+  region_id: string
+  email?: string
+  billing_address_id?: string
+  billing_address?: Partial<AddressPayload>
+  shipping_address_id?: string
+  shipping_address?: Partial<AddressPayload>
+  gift_cards?: GiftCard[]
+  discounts?: Discount[]
+  customer_id?: string
+  context?: object
+  metadata?: object
+}
+
 export type CartUpdateProps = {
   region_id?: string
   country_code?: string
   email?: string
-  shipping_address_id: string
-  billing_address_id: string
+  shipping_address_id?: string
+  billing_address_id?: string
   billing_address?: AddressPayload
   shipping_address?: AddressPayload
   completed_at?: Date

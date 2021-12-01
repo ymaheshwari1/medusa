@@ -21,8 +21,8 @@ import {
   FilterableCartProps,
   LineItemUpdate,
   CartUpdateProps,
-  TotalsField,
-  TotaledCart,
+  CartCreateProps,
+  TotalField,
 } from "../types/cart"
 
 import EventBusService from "./event-bus"
@@ -218,7 +218,7 @@ class CartService extends BaseService {
 
   transformQueryForTotals_(
     config: FindConfig<Cart>
-  ): FindConfig<Cart> & { totalsToSelect: string[] } {
+  ): FindConfig<Cart> & { totalsToSelect: TotalField[] } {
     let { select, relations } = config
 
     if (!select) {
@@ -238,7 +238,9 @@ class CartService extends BaseService {
       "total",
     ]
 
-    const totalsToSelect = select.filter((v) => totalFields.includes(v))
+    const totalsToSelect = select.filter((v) =>
+      totalFields.includes(v)
+    ) as TotalField[]
     if (totalsToSelect.length > 0) {
       const relationSet = new Set(relations)
       relationSet.add("items")
@@ -263,15 +265,40 @@ class CartService extends BaseService {
     }
   }
 
-  async decorateTotals_(cart: Cart): Promise<TotaledCart> {
-    cart.shipping_total = this.totalsService_.getShippingTotal(cart)
-    cart.discount_total = this.totalsService_.getDiscountTotal(cart)
-    cart.tax_total = await this.totalsService_.getTaxTotal(cart)
-    cart.gift_card_total = this.totalsService_.getGiftCardTotal(cart)
-    cart.subtotal = this.totalsService_.getSubtotal(cart)
-    cart.total = await this.totalsService_.getTotal(cart)
+  async decorateTotals_(
+    cart: Cart,
+    totalsToSelect: TotalField[]
+  ): Promise<Cart> {
+    const totals: { [K in TotalField]?: number } = {}
 
-    return cart as TotaledCart
+    for (const key of totalsToSelect) {
+      switch (key) {
+        case "total": {
+          totals.total = await this.totalsService_.getTotal(cart)
+          break
+        }
+        case "shipping_total": {
+          totals.shipping_total = this.totalsService_.getShippingTotal(cart)
+          break
+        }
+        case "discount_total":
+          totals.discount_total = this.totalsService_.getDiscountTotal(cart)
+          break
+        case "tax_total":
+          totals.tax_total = await this.totalsService_.getTaxTotal(cart)
+          break
+        case "gift_card_total":
+          totals.gift_card_total = this.totalsService_.getGiftCardTotal(cart)
+          break
+        case "subtotal":
+          totals.subtotal = this.totalsService_.getSubtotal(cart)
+          break
+        default:
+          break
+      }
+    }
+
+    return Object.assign(cart, totals)
   }
 
   /**
@@ -302,7 +329,8 @@ class CartService extends BaseService {
     const cartRepo = this.manager_.getCustomRepository(this.cartRepository_)
     const validatedId = this.validateId_(cartId)
 
-    const { select, relations } = this.transformQueryForTotals_(options)
+    const { select, relations, totalsToSelect } =
+      this.transformQueryForTotals_(options)
 
     const query = this.buildQuery_(
       { id: validatedId },
@@ -328,8 +356,7 @@ class CartService extends BaseService {
       )
     }
 
-    const cart = await this.decorateTotals_(raw)
-    return cart
+    return await this.decorateTotals_(raw, totalsToSelect)
   }
 
   /**
@@ -337,10 +364,13 @@ class CartService extends BaseService {
    * @param {Object} data - the data to create the cart with
    * @return {Promise} the result of the create operation
    */
-  async create(data: Partial<Cart>): Promise<Cart> {
+  async create(data: CartCreateProps): Promise<Cart> {
     return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
       const addressRepo = manager.getCustomRepository(this.addressRepository_)
+
+      const toCreate: Partial<Cart> = {}
+
       const { region_id } = data
       if (!region_id) {
         throw new MedusaError(
@@ -353,25 +383,27 @@ class CartService extends BaseService {
         relations: ["countries"],
       })
 
+      toCreate.region_id = region.id
+
       const regCountries = region.countries.map(({ iso_2 }) => iso_2)
 
       if (data.email) {
         const customer = await this.createOrFetchUserFromEmail_(data.email)
-        data.customer = customer
-        data.customer_id = customer.id
-        data.email = customer.email
+        toCreate.customer = customer
+        toCreate.customer_id = customer.id
+        toCreate.email = customer.email
       }
 
       if (data.shipping_address_id) {
         const addr = await addressRepo.findOne(data.shipping_address_id)
-        data.shipping_address = addr
+        toCreate.shipping_address = addr
       }
 
       if (!data.shipping_address) {
         if (region.countries.length === 1) {
           // Preselect the country if the region only has 1
           // and create address entity
-          data.shipping_address = addressRepo.create({
+          toCreate.shipping_address = addressRepo.create({
             country_code: regCountries[0],
           })
         }
@@ -382,11 +414,6 @@ class CartService extends BaseService {
             "Shipping country not in region"
           )
         }
-      }
-
-      const toCreate = {
-        ...data,
-        region_id: region.id,
       }
 
       const inProgress = cartRepo.create(toCreate)
@@ -684,16 +711,16 @@ class CartService extends BaseService {
         ],
       })
 
-      if ("region_id" in update) {
+      if (typeof update.region_id !== "undefined") {
         const countryCode =
-          update.country_code || update.shipping_address?.country_code
+          (update.country_code || update.shipping_address?.country_code) ?? null
         await this.setRegion_(cart, update.region_id, countryCode)
       }
 
-      if ("customer_id" in update) {
+      if (typeof update.customer_id !== "undefined") {
         await this.updateCustomerId_(cart, update.customer_id)
       } else {
-        if ("email" in update) {
+        if (typeof update.email !== "undefined") {
           const customer = await this.createOrFetchUserFromEmail_(update.email)
           cart.customer = customer
           cart.customer_id = customer.id
@@ -703,20 +730,36 @@ class CartService extends BaseService {
 
       const addrRepo = manager.getCustomRepository(this.addressRepository_)
       if ("shipping_address_id" in update || "shipping_address" in update) {
-        const address = update.shipping_address_id || update.shipping_address
-        await this.updateShippingAddress_(cart, address, addrRepo)
+        let address: string | Partial<Address> | undefined
+        if (typeof update.shipping_address_id !== "undefined") {
+          address = update.shipping_address_id
+        } else if (typeof update.shipping_address !== "undefined") {
+          address = update.shipping_address
+        }
+
+        if (address) {
+          await this.updateShippingAddress_(cart, address, addrRepo)
+        }
       }
 
       if ("billing_address_id" in update || "billing_address" in update) {
-        const address = update.billing_address_id || update.billing_address
-        await this.updateBillingAddress_(cart, address, addrRepo)
+        let address: string | Partial<Address> | undefined
+        if (typeof update.billing_address_id !== "undefined") {
+          address = update.billing_address_id
+        } else if (typeof update.billing_address !== "undefined") {
+          address = update.shipping_address
+        }
+
+        if (address) {
+          await this.updateBillingAddress_(cart, address, addrRepo)
+        }
       }
 
-      if ("discounts" in update) {
+      if (typeof update.discounts !== "undefined") {
         const previousDiscounts = cart.discounts
         cart.discounts = []
 
-        for (const { code } of update.discounts!) {
+        for (const { code } of update.discounts) {
           await this.applyDiscount(cart, code)
         }
 
@@ -838,7 +881,7 @@ class CartService extends BaseService {
    */
   async updateBillingAddress_(
     cart: Cart,
-    addressOrId: Address | string,
+    addressOrId: Partial<Address> | string,
     addrRepo: AddressRepository
   ): Promise<void> {
     let address: Address
@@ -1152,10 +1195,17 @@ class CartService extends BaseService {
     return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepository = manager.getCustomRepository(this.cartRepository_)
 
-      const cart = (await this.retrieve(cartId, {
+      const cart = await this.retrieve(cartId, {
         select: ["total"],
         relations: ["region", "payment_sessions"],
-      })) as TotaledCart
+      })
+
+      if (typeof cart.total === "undefined") {
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          "cart.total should be defined"
+        )
+      }
 
       // If cart total is 0, we don't perform anything payment related
       if (cart.total <= 0) {
@@ -1438,7 +1488,7 @@ class CartService extends BaseService {
   async addShippingMethod(
     cartId: string,
     optionId: string,
-    data: object
+    data: object = {}
   ): Promise<Cart> {
     return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
@@ -1561,7 +1611,7 @@ class CartService extends BaseService {
   async setRegion_(
     cart: Cart,
     regionId: string,
-    countryCode: string
+    countryCode: string | null
   ): Promise<void> {
     if (cart.completed_at || cart.payment_authorized_at) {
       throw new MedusaError(
@@ -1625,7 +1675,7 @@ class CartService extends BaseService {
      * If the client has specified which country code we are updating to check
      * that that country is in fact in the country and perform the update.
      */
-    if (countryCode !== undefined) {
+    if (countryCode !== null) {
       if (
         !region.countries.find(
           ({ iso_2 }) => iso_2 === countryCode.toLowerCase()
