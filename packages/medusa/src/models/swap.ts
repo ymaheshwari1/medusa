@@ -61,39 +61,22 @@ export class Swap {
   @Column({ type: "string" })
   order_id: string
 
-  @ManyToOne(
-    () => Order,
-    o => o.swaps
-  )
+  @ManyToOne(() => Order, (o) => o.swaps)
   @JoinColumn({ name: "order_id" })
   order: Order
 
-  @OneToMany(
-    () => LineItem,
-    item => item.swap,
-    { cascade: ["insert"] }
-  )
-  additional_items: LineItem
+  @OneToMany(() => LineItem, (item) => item.swap, { cascade: ["insert"] })
+  additional_items: LineItem[]
 
-  @OneToOne(
-    () => Return,
-    ret => ret.swap,
-    { cascade: ["insert"] }
-  )
+  @OneToOne(() => Return, (ret) => ret.swap, { cascade: ["insert"] })
   return_order: Return
 
-  @OneToMany(
-    () => Fulfillment,
-    fulfillment => fulfillment.swap,
-    { cascade: ["insert"] }
-  )
+  @OneToMany(() => Fulfillment, (fulfillment) => fulfillment.swap, {
+    cascade: ["insert"],
+  })
   fulfillments: Fulfillment[]
 
-  @OneToOne(
-    () => Payment,
-    p => p.swap,
-    { cascade: ["insert"] }
-  )
+  @OneToOne(() => Payment, (p) => p.swap, { cascade: ["insert"] })
   payment: Payment
 
   @Column({ type: "int", nullable: true })
@@ -106,11 +89,9 @@ export class Swap {
   @JoinColumn({ name: "shipping_address_id" })
   shipping_address: Address
 
-  @OneToMany(
-    () => ShippingMethod,
-    method => method.swap,
-    { cascade: ["insert"] }
-  )
+  @OneToMany(() => ShippingMethod, (method) => method.swap, {
+    cascade: ["insert"],
+  })
   shipping_methods: ShippingMethod[]
 
   @Column({ nullable: true })

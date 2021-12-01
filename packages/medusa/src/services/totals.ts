@@ -2,6 +2,18 @@ import _ from "lodash"
 import { BaseService } from "medusa-interfaces"
 import { MedusaError } from "medusa-core-utils"
 
+import { Order } from "../models/order"
+import { Cart } from "../models/cart"
+import { LineItem } from "../models/line-item"
+import { Discount } from "../models/discount"
+import { DiscountRuleType } from "../models/discount-rule"
+
+import {
+  SubtotalOptions,
+  LineDiscount,
+  LineDiscountAmount,
+} from "../types/totals"
+
 /**
  * A service that calculates total and subtotals for orders, carts etc..
  * @implements {BaseService}
@@ -16,7 +28,7 @@ class TotalsService extends BaseService {
    * @param {object} object - object to calculate total for
    * @return {int} the calculated subtotal
    */
-  async getTotal(object): Promise<number> {
+  async getTotal(object: Cart | Order): Promise<number> {
     const subtotal = this.getSubtotal(object)
     const taxTotal = await this.getTaxTotal(object)
     const discountTotal = this.getDiscountTotal(object)
@@ -26,7 +38,7 @@ class TotalsService extends BaseService {
     return subtotal + taxTotal + shippingTotal - discountTotal - giftCardTotal
   }
 
-  getPaidTotal(order): number {
+  getPaidTotal(order: Order): number {
     const total = order.payments?.reduce((acc, next) => {
       acc += next.amount
       return acc
@@ -35,7 +47,7 @@ class TotalsService extends BaseService {
     return total
   }
 
-  getSwapTotal(order): number {
+  getSwapTotal(order: Order): number {
     let swapTotal = 0
     if (order.swaps && order.swaps.length) {
       for (const s of order.swaps) {
@@ -52,7 +64,7 @@ class TotalsService extends BaseService {
    * @param {Object} opts - options
    * @return {int} the calculated subtotal
    */
-  getSubtotal(object, opts = {}): number {
+  getSubtotal(object: Cart | Order, opts: SubtotalOptions = {}): number {
     let subtotal = 0
     if (!object.items) {
       return subtotal
@@ -76,7 +88,7 @@ class TotalsService extends BaseService {
    * @param {Cart | Object} object - cart or order to calculate subtotal for
    * @return {int} shipping total
    */
-  getShippingTotal(object): number {
+  getShippingTotal(object: Cart | Order): number {
     const { shipping_methods } = object
     return shipping_methods.reduce((acc, next) => {
       return acc + next.price
@@ -89,7 +101,7 @@ class TotalsService extends BaseService {
    * @param {Cart | Object} object - cart or order to calculate subtotal for
    * @return {int} tax total
    */
-  async getTaxTotal(object): Promise<number> {
+  async getTaxTotal(object: Cart | Order): Promise<number> {
     const subtotal = this.getSubtotal(object)
     const shippingTotal = this.getShippingTotal(object)
     const discountTotal = this.getDiscountTotal(object)
@@ -104,7 +116,7 @@ class TotalsService extends BaseService {
     )
   }
 
-  getRefundedTotal(object): number {
+  getRefundedTotal(object: Order): number {
     if (!object.refunds) {
       return 0
     }
@@ -113,7 +125,7 @@ class TotalsService extends BaseService {
     return this.rounded(total)
   }
 
-  getLineItemRefund(object, lineItem): number {
+  getLineItemRefund(object: Cart | Order, lineItem: LineItem): number {
     const { discounts } = object
     const tax_rate =
       typeof object.tax_rate !== "undefined"
@@ -148,7 +160,7 @@ class TotalsService extends BaseService {
    * @param {[LineItem]} lineItems -
    * @return {int} the calculated subtotal
    */
-  getRefundTotal(order, lineItems): number {
+  getRefundTotal(order: Order, lineItems: LineItem[]): number {
     let itemIds = order.items.map((i) => i.id)
 
     // in case we swap a swap, we need to include swap items
@@ -190,7 +202,13 @@ class TotalsService extends BaseService {
    * @return {{ string, string, int }} triples of lineitem, variant and
    *    applied discount
    */
-  calculateDiscount_(lineItem, variant, variantPrice, value, discountType) {
+  calculateDiscount_(
+    lineItem: LineItem,
+    variant: string,
+    variantPrice: number,
+    value: number,
+    discountType: DiscountRuleType
+  ): LineDiscount {
     if (!lineItem.allow_discounts) {
       return {
         lineItem,
@@ -198,7 +216,7 @@ class TotalsService extends BaseService {
         amount: 0,
       }
     }
-    if (discountType === "percentage") {
+    if (discountType === DiscountRuleType.PERCENTAGE) {
       return {
         lineItem,
         variant,
@@ -227,8 +245,11 @@ class TotalsService extends BaseService {
    * @return {[{ string, string, int }]} array of triples of lineitem, variant
    *    and applied discount
    */
-  getAllocationItemDiscounts(discount, cart) {
-    const discounts = []
+  getAllocationItemDiscounts(
+    discount: Discount,
+    cart: Cart | Order
+  ): LineDiscount[] {
+    const discounts: LineDiscount[] = []
     for (const item of cart.items) {
       if (discount.rule.valid_for?.length > 0) {
         discount.rule.valid_for.map(({ id }) => {
@@ -249,19 +270,22 @@ class TotalsService extends BaseService {
     return discounts
   }
 
-  getLineDiscounts(cart, discount) {
+  getLineDiscounts(
+    cart: Cart | Order,
+    discount: Discount
+  ): LineDiscountAmount[] {
     const subtotal = this.getSubtotal(cart, { excludeNonDiscounts: true })
 
-    let merged = [...cart.items]
+    let merged: LineItem[] = [...cart.items]
 
     // merge items from order with items from order swaps
-    if (cart.swaps && cart.swaps.length) {
+    if ("swaps" in cart && cart.swaps.length) {
       for (const s of cart.swaps) {
         merged = [...merged, ...s.additional_items]
       }
     }
 
-    if (cart.claims && cart.claims.length) {
+    if ("claims" in cart && cart.claims.length) {
       for (const c of cart.claims) {
         merged = [...merged, ...c.additional_items]
       }
@@ -290,8 +314,7 @@ class TotalsService extends BaseService {
     } else if (allocation === "item") {
       const allocationDiscounts = this.getAllocationItemDiscounts(
         discount,
-        cart,
-        type
+        cart
       )
       return merged.map((item) => {
         const discounted = allocationDiscounts.find(
@@ -307,10 +330,10 @@ class TotalsService extends BaseService {
     return merged.map((i) => ({ item: i, amount: 0 }))
   }
 
-  getGiftCardTotal(cart): number {
+  getGiftCardTotal(cart: Cart | Order): number {
     const giftCardable = this.getSubtotal(cart) - this.getDiscountTotal(cart)
 
-    if (cart.gift_card_transactions) {
+    if ("gift_card_transactions" in cart) {
       return cart.gift_card_transactions.reduce(
         (acc, next) => acc + next.amount,
         0
@@ -334,7 +357,7 @@ class TotalsService extends BaseService {
    * @param {Cart} cart - the cart to calculate discounts for
    * @return {int} the total discounts amount
    */
-  getDiscountTotal(cart): number {
+  getDiscountTotal(cart: Cart | Order): number {
     const subtotal = this.getSubtotal(cart, { excludeNonDiscounts: true })
 
     if (!cart.discounts || !cart.discounts.length) {
@@ -359,18 +382,13 @@ class TotalsService extends BaseService {
     } else if (type === "percentage" && allocation === "item") {
       const itemPercentageDiscounts = this.getAllocationItemDiscounts(
         discount,
-        cart,
-        "percentage"
+        cart
       )
       toReturn = _.sumBy(itemPercentageDiscounts, (d) => d.amount)
     } else if (type === "fixed" && allocation === "total") {
       toReturn = value
     } else if (type === "fixed" && allocation === "item") {
-      const itemFixedDiscounts = this.getAllocationItemDiscounts(
-        discount,
-        cart,
-        "fixed"
-      )
+      const itemFixedDiscounts = this.getAllocationItemDiscounts(discount, cart)
       toReturn = _.sumBy(itemFixedDiscounts, (d) => d.amount)
     }
 
@@ -381,7 +399,7 @@ class TotalsService extends BaseService {
     return this.rounded(Math.min(subtotal, toReturn))
   }
 
-  rounded(value): number {
+  rounded(value: number): number {
     return Math.round(value)
   }
 }
