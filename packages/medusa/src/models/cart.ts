@@ -145,7 +145,7 @@ export class Cart {
     cascade: ["insert", "remove", "soft-remove"],
   })
   @JoinColumn({ name: "shipping_address_id" })
-  shipping_address: Address
+  shipping_address: Address | null
 
   @OneToMany(() => LineItem, (lineItem) => lineItem.cart, {
     cascade: ["insert", "remove"],
@@ -172,7 +172,7 @@ export class Cart {
       referencedColumnName: "id",
     },
   })
-  discounts: Discount
+  discounts: Discount[]
 
   @ManyToMany(() => GiftCard)
   @JoinTable({
@@ -186,7 +186,7 @@ export class Cart {
       referencedColumnName: "id",
     },
   })
-  gift_cards: GiftCard
+  gift_cards: GiftCard[]
 
   @Index()
   @Column({ nullable: true })
@@ -196,7 +196,7 @@ export class Cart {
   @JoinColumn({ name: "customer_id" })
   customer: Customer
 
-  payment_session: PaymentSession
+  payment_session: PaymentSession | null
 
   @OneToMany(() => PaymentSession, (paymentSession) => paymentSession.cart, {
     cascade: true,

@@ -2,6 +2,7 @@ import { IsBoolean, IsNumber, IsString, ValidateNested } from "class-validator"
 import { IsType } from "../utils/validators/is-type"
 import { Cart } from "../models/cart"
 import {
+  AddressPayload,
   DateComparisonOperator,
   NumericalComparisonOperator,
   StringComparisonOperator,
@@ -38,4 +39,35 @@ export class FilterableCartProps {
 
   @IsType([DateComparisonOperator])
   updated_at?: DateComparisonOperator
+}
+
+// TODO: Probably worth moving to `./line-item` instead
+export type LineItemUpdate = {
+  quantity: number
+  metadata: JSON
+}
+
+class GiftCard {
+  code: string
+}
+
+class Discount {
+  code: string
+}
+
+export type CartUpdateProps = {
+  region_id?: string
+  country_code?: string
+  email?: string
+  shipping_address_id: string
+  billing_address_id: string
+  billing_address?: AddressPayload
+  shipping_address?: AddressPayload
+  completed_at?: Date
+  payment_authorized_at?: Date
+  gift_cards?: GiftCard[]
+  discounts?: Discount[]
+  customer_id?: string
+  context?: object
+  metadata?: object
 }

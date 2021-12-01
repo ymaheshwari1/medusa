@@ -51,45 +51,45 @@ export class Address {
 
   @Index()
   @Column({ nullable: true })
-  customer_id: string
+  customer_id: string | null
 
   @ManyToOne(() => Customer)
   @JoinColumn({ name: "customer_id" })
-  customer: Customer
+  customer: Customer | null
 
   @Column({ nullable: true })
-  company: string
+  company: string | null
 
   @Column({ nullable: true })
-  first_name: string
+  first_name: string | null
 
   @Column({ nullable: true })
-  last_name: string
+  last_name: string | null
 
   @Column({ nullable: true })
-  address_1: string
+  address_1: string | null
 
   @Column({ nullable: true })
-  address_2: string
+  address_2: string | null
 
   @Column({ nullable: true })
-  city: string
+  city: string | null
 
   @Column({ nullable: true })
-  country_code: string
+  country_code: string | null
 
   @ManyToOne(() => Country)
   @JoinColumn({ name: "country_code", referencedColumnName: "iso_2" })
-  country: Country
+  country: Country | null
 
   @Column({ nullable: true })
-  province: string
+  province: string | null
 
   @Column({ nullable: true })
-  postal_code: string
+  postal_code: string | null
 
   @Column({ nullable: true })
-  phone: string
+  phone: string | null
 
   @CreateDateColumn({ type: resolveDbType("timestamptz") })
   created_at: Date
@@ -98,7 +98,7 @@ export class Address {
   updated_at: Date
 
   @DeleteDateColumn({ type: resolveDbType("timestamptz") })
-  deleted_at: Date
+  deleted_at: Date | null
 
   @DbAwareColumn({ type: "jsonb", nullable: true })
   metadata: any

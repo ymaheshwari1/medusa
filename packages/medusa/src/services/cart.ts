@@ -8,11 +8,22 @@ import { CartRepository } from "../repositories/cart"
 import { AddressRepository } from "../repositories/address"
 import { PaymentSessionRepository } from "../repositories/payment-session"
 
-import { Region } from "../models/region"
+import { Address } from "../models/address"
+import { Discount } from "../models/discount"
 import { Cart } from "../models/cart"
+import { Customer } from "../models/customer"
+import { LineItem } from "../models/line-item"
+import { ShippingMethod } from "../models/shipping-method"
+import { CustomShippingOption } from "../models/custom-shipping-option"
 
 import { FindConfig } from "../types/common"
-import { FilterableCartProps, TotalsField, TotaledCart } from "../types/cart"
+import {
+  FilterableCartProps,
+  LineItemUpdate,
+  CartUpdateProps,
+  TotalsField,
+  TotaledCart,
+} from "../types/cart"
 
 import EventBusService from "./event-bus"
 import ProductVariantService from "./product-variant"
@@ -327,7 +338,7 @@ class CartService extends BaseService {
    * @return {Promise} the result of the create operation
    */
   async create(data: Partial<Cart>): Promise<Cart> {
-    return this.atomicPhase_(async (manager) => {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
       const addressRepo = manager.getCustomRepository(this.addressRepository_)
       const { region_id } = data
@@ -378,7 +389,7 @@ class CartService extends BaseService {
         region_id: region.id,
       }
 
-      const inProgress = await cartRepo.create(toCreate)
+      const inProgress = cartRepo.create(toCreate)
       const result = await cartRepo.save(inProgress)
       await this.eventBus_
         .withTransaction(manager)
@@ -395,8 +406,8 @@ class CartService extends BaseService {
    * @param {LineItem} lineItemId - the line item to remove.
    * @return {Promise} the result of the update operation
    */
-  async removeLineItem(cartId, lineItemId) {
-    return this.atomicPhase_(async (manager) => {
+  async removeLineItem(cartId: string, lineItemId: string): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: [
           "items",
@@ -447,7 +458,10 @@ class CartService extends BaseService {
    * @param {LineItem} lineItem - the line item
    * @return {boolean}
    */
-  validateLineItemShipping_(shippingMethods, lineItem) {
+  validateLineItemShipping_(
+    shippingMethods: ShippingMethod[],
+    lineItem: LineItem
+  ): boolean {
     if (!lineItem.variant_id) {
       return true
     }
@@ -474,8 +488,8 @@ class CartService extends BaseService {
    * @param {LineItem} lineItem - the line item to add.
    * @return {Promise} the result of the update operation
    */
-  async addLineItem(cartId, lineItem) {
-    return this.atomicPhase_(async (manager) => {
+  async addLineItem(cartId: string, lineItem: LineItem): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: [
           "shipping_methods",
@@ -486,12 +500,13 @@ class CartService extends BaseService {
         ],
       })
 
-      let currentItem
+      let currentItem: LineItem | undefined
       if (lineItem.should_merge) {
         currentItem = cart.items.find((line) => {
           if (line.should_merge && line.variant_id === lineItem.variant_id) {
             return _.isEqual(line.metadata, lineItem.metadata)
           }
+          return false
         })
       }
 
@@ -553,8 +568,12 @@ class CartService extends BaseService {
    * include an id field.
    * @return {Promise} the result of the update operation
    */
-  async updateLineItem(cartId, lineItemId, lineItemUpdate) {
-    return this.atomicPhase_(async (manager) => {
+  async updateLineItem(
+    cartId: string,
+    lineItemId: string,
+    lineItemUpdate: LineItemUpdate
+  ): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: ["items", "payment_sessions"],
       })
@@ -602,7 +621,7 @@ class CartService extends BaseService {
    * @param {Cart} cart - the the cart to adjust free shipping for
    * @param {boolean} shouldAdd - flag to indicate, if we should add or remove
    */
-  async adjustFreeShipping_(cart, shouldAdd) {
+  async adjustFreeShipping_(cart: Cart, shouldAdd: boolean): Promise<void> {
     if (cart.shipping_methods?.length) {
       // if any free shipping discounts, we ensure to update shipping method amount
       if (shouldAdd) {
@@ -637,8 +656,8 @@ class CartService extends BaseService {
     }
   }
 
-  async update(cartId, update) {
-    return this.atomicPhase_(async (manager) => {
+  async update(cartId: string, update: CartUpdateProps): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
       const cart = await this.retrieve(cartId, {
         select: [
@@ -697,7 +716,7 @@ class CartService extends BaseService {
         const previousDiscounts = cart.discounts
         cart.discounts = []
 
-        for (const { code } of update.discounts) {
+        for (const { code } of update.discounts!) {
           await this.applyDiscount(cart, code)
         }
 
@@ -722,7 +741,7 @@ class CartService extends BaseService {
       if ("gift_cards" in update) {
         cart.gift_cards = []
 
-        for (const { code } of update.gift_cards) {
+        for (const { code } of update.gift_cards!) {
           await this.applyGiftCard_(cart, code)
         }
       }
@@ -740,11 +759,11 @@ class CartService extends BaseService {
       }
 
       if ("completed_at" in update) {
-        cart.completed_at = update.completed_at
+        cart.completed_at = update.completed_at!
       }
 
       if ("payment_authorized_at" in update) {
-        cart.payment_authorized_at = update.payment_authorized_at
+        cart.payment_authorized_at = update.payment_authorized_at!
       }
 
       const result = await cartRepo.save(cart)
@@ -769,7 +788,7 @@ class CartService extends BaseService {
    * @param {string} customerId - the customer to add to cart
    * @return {Promise} the result of the update operation
    */
-  async updateCustomerId_(cart, customerId) {
+  async updateCustomerId_(cart: Cart, customerId: string): Promise<void> {
     const customer = await this.customerService_
       .withTransaction(this.transactionManager_)
       .retrieve(customerId)
@@ -784,7 +803,7 @@ class CartService extends BaseService {
    * @param {string} email - the email to use
    * @return {Promise} the resultign customer object
    */
-  async createOrFetchUserFromEmail_(email) {
+  async createOrFetchUserFromEmail_(email: string): Promise<Customer> {
     const schema = Validator.string().email().required()
     const { value, error } = schema.validate(email.toLowerCase())
     if (error) {
@@ -817,17 +836,24 @@ class CartService extends BaseService {
    * updates
    * @return {Promise} the result of the update operation
    */
-  async updateBillingAddress_(cart, addressOrId, addrRepo) {
+  async updateBillingAddress_(
+    cart: Cart,
+    addressOrId: Address | string,
+    addrRepo: AddressRepository
+  ): Promise<void> {
+    let address: Address
     if (typeof addressOrId === `string`) {
-      addressOrId = await addrRepo.findOne({
+      address = (await addrRepo.findOne({
         where: { id: addressOrId },
-      })
+      })) as Address
+    } else {
+      address = addressOrId as Address
     }
 
-    addressOrId.country_code = addressOrId.country_code.toLowerCase()
+    address.country_code = address.country_code?.toLowerCase() ?? null
 
-    if (addressOrId.id) {
-      const updated = await addrRepo.save(addressOrId)
+    if (address.id) {
+      const updated = await addrRepo.save(address)
       cart.billing_address = updated
     } else {
       if (cart.billing_address_id) {
@@ -835,10 +861,10 @@ class CartService extends BaseService {
           where: { id: cart.billing_address_id },
         })
 
-        await addrRepo.save({ ...addr, ...addressOrId })
+        await addrRepo.save({ ...addr, ...address })
       } else {
         const created = addrRepo.create({
-          ...addressOrId,
+          ...address,
         })
 
         cart.billing_address = created
@@ -855,25 +881,31 @@ class CartService extends BaseService {
    * updates
    * @return {Promise} the result of the update operation
    */
-  async updateShippingAddress_(cart, addressOrId, addrRepo) {
+  async updateShippingAddress_(
+    cart: Cart,
+    addressOrId: Partial<Address> | string,
+    addrRepo: AddressRepository
+  ): Promise<void> {
+    let address: Address
+
     if (addressOrId === null) {
       cart.shipping_address = null
       return
     }
 
     if (typeof addressOrId === `string`) {
-      addressOrId = await addrRepo.findOne({
+      address = (await addrRepo.findOne({
         where: { id: addressOrId },
-      })
+      })) as Address
+    } else {
+      address = addressOrId as Address
     }
 
-    addressOrId.country_code = addressOrId.country_code?.toLowerCase() ?? null
+    address.country_code = address.country_code?.toLowerCase() ?? null
 
     if (
-      addressOrId.country_code &&
-      !cart.region.countries.find(
-        ({ iso_2 }) => addressOrId.country_code === iso_2
-      )
+      address.country_code &&
+      !cart.region.countries.find(({ iso_2 }) => address.country_code === iso_2)
     ) {
       throw new MedusaError(
         MedusaError.Types.INVALID_DATA,
@@ -881,8 +913,8 @@ class CartService extends BaseService {
       )
     }
 
-    if (addressOrId.id) {
-      const updated = await addrRepo.save(addressOrId)
+    if (address.id) {
+      const updated = await addrRepo.save(address)
       cart.shipping_address = updated
     } else {
       if (cart.shipping_address_id) {
@@ -890,10 +922,10 @@ class CartService extends BaseService {
           where: { id: cart.shipping_address_id },
         })
 
-        await addrRepo.save({ ...addr, ...addressOrId })
+        await addrRepo.save({ ...addr, ...address })
       } else {
         const created = addrRepo.create({
-          ...addressOrId,
+          ...address,
         })
 
         cart.shipping_address = created
@@ -901,7 +933,7 @@ class CartService extends BaseService {
     }
   }
 
-  async applyGiftCard_(cart, code) {
+  async applyGiftCard_(cart: Cart, code: string): Promise<void> {
     const giftCard = await this.giftCardService_.retrieveByCode(code)
 
     if (giftCard.is_disabled) {
@@ -935,7 +967,7 @@ class CartService extends BaseService {
    * @param {string} discountCode - the discount code
    * @return {Promise} the result of the update operation
    */
-  async applyDiscount(cart, discountCode) {
+  async applyDiscount(cart: Cart, discountCode: string): Promise<void> {
     const discount = await this.discountService_.retrieveByCode(discountCode, [
       "rule",
       "rule.valid_for",
@@ -1034,8 +1066,8 @@ class CartService extends BaseService {
    * @param {string} discountCode - the discount code to remove
    * @return {Promise<Cart>} the resulting cart
    */
-  async removeDiscount(cartId, discountCode) {
-    return this.atomicPhase_(async (manager) => {
+  async removeDiscount(cartId: string, discountCode: string): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: [
           "discounts",
@@ -1082,8 +1114,8 @@ class CartService extends BaseService {
    * @param {string} cartId - the id of the cart to update the payment session for
    * @param {object} update - the data to update the payment session with
    */
-  async updatePaymentSession(cartId, update) {
-    return this.atomicPhase_(async (manager) => {
+  async updatePaymentSession(cartId: string, update: object): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: ["payment_sessions"],
       })
@@ -1116,14 +1148,14 @@ class CartService extends BaseService {
    *    this could be IP address or similar for fraud handling.
    * @return {Promise<Cart>} the resulting cart
    */
-  async authorizePayment(cartId, context = {}) {
-    return this.atomicPhase_(async (manager) => {
+  async authorizePayment(cartId: string, context: object = {}): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepository = manager.getCustomRepository(this.cartRepository_)
 
-      const cart = await this.retrieve(cartId, {
+      const cart = (await this.retrieve(cartId, {
         select: ["total"],
         relations: ["region", "payment_sessions"],
-      })
+      })) as TotaledCart
 
       // If cart total is 0, we don't perform anything payment related
       if (cart.total <= 0) {
@@ -1163,8 +1195,8 @@ class CartService extends BaseService {
    * @param {string} providerId - the id of the provider to be set to the cart
    * @return {Promise} result of update operation
    */
-  async setPaymentSession(cartId, providerId) {
-    return this.atomicPhase_(async (manager) => {
+  async setPaymentSession(cartId: string, providerId: string): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const psRepo = manager.getCustomRepository(this.paymentSessionRepository_)
 
       const cart = await this.retrieve(cartId, {
@@ -1193,14 +1225,21 @@ class CartService extends BaseService {
       }
 
       await Promise.all(
-        cart.payment_sessions.map((ps) => {
-          return psRepo.save({ ...ps, is_selected: null })
+        cart.payment_sessions.map(async (ps) => {
+          return await psRepo.save({ ...ps, is_selected: null })
         })
       )
 
       const sess = cart.payment_sessions.find(
         (ps) => ps.provider_id === providerId
       )
+
+      if (!sess) {
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          "Could not find payment session"
+        )
+      }
 
       sess.is_selected = true
 
@@ -1225,13 +1264,13 @@ class CartService extends BaseService {
    * session for
    * @return {Promise} the result of the update operation.
    */
-  async setPaymentSessions(cartOrCartId) {
-    return this.atomicPhase_(async (manager) => {
+  async setPaymentSessions(cartOrCartId: Cart | string): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const psRepo = manager.getCustomRepository(this.paymentSessionRepository_)
 
       const cartId =
         typeof cartOrCartId === `string` ? cartOrCartId : cartOrCartId.id
-      const cart = await this.retrieve(cartId, {
+      const cart = (await this.retrieve(cartId, {
         select: [
           "gift_card_total",
           "subtotal",
@@ -1253,12 +1292,12 @@ class CartService extends BaseService {
           "payment_sessions",
           "customer",
         ],
-      })
+      })) as TotaledCart
 
       const region = cart.region
 
       // If there are existing payment sessions ensure that these are up to date
-      const seen = []
+      const seen: string[] = []
       if (cart.payment_sessions && cart.payment_sessions.length) {
         for (const session of cart.payment_sessions) {
           if (
@@ -1310,8 +1349,11 @@ class CartService extends BaseService {
    *    should be removed.
    * @return {Promise<Cart>} the resulting cart.
    */
-  async deletePaymentSession(cartId, providerId) {
-    return this.atomicPhase_(async (manager) => {
+  async deletePaymentSession(
+    cartId: string,
+    providerId: string
+  ): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: ["payment_sessions"],
       })
@@ -1351,8 +1393,11 @@ class CartService extends BaseService {
    *    should be removed.
    * @return {Promise<Cart>} the resulting cart.
    */
-  async refreshPaymentSession(cartId, providerId) {
-    return this.atomicPhase_(async (manager) => {
+  async refreshPaymentSession(
+    cartId: string,
+    providerId: string
+  ): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: ["payment_sessions"],
       })
@@ -1390,8 +1435,12 @@ class CartService extends BaseService {
    * @param {Object} data - the fulmillment data for the method
    * @return {Promise} the result of the update operation
    */
-  async addShippingMethod(cartId, optionId, data) {
-    return this.atomicPhase_(async (manager) => {
+  async addShippingMethod(
+    cartId: string,
+    optionId: string,
+    data: object
+  ): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         select: ["subtotal"],
         relations: [
@@ -1483,7 +1532,10 @@ class CartService extends BaseService {
    * @param {string} optionId - id of the normal or custom shipping option to find in the cartCustomShippingOptions
    * @return {CustomShippingOption | undefined}
    */
-  findCustomShippingOption(cartCustomShippingOptions, optionId) {
+  findCustomShippingOption(
+    cartCustomShippingOptions: CustomShippingOption[],
+    optionId: string
+  ): CustomShippingOption | undefined {
     const customOption = cartCustomShippingOptions?.find(
       (cso) => cso.shipping_option_id === optionId
     )
@@ -1506,7 +1558,11 @@ class CartService extends BaseService {
    * @param {string} countryCode - the country code to set the country to
    * @return {Promise} the result of the update operation
    */
-  async setRegion_(cart, regionId, countryCode) {
+  async setRegion_(
+    cart: Cart,
+    regionId: string,
+    countryCode: string
+  ): Promise<void> {
     if (cart.completed_at || cart.payment_authorized_at) {
       throw new MedusaError(
         MedusaError.Types.NOT_ALLOWED,
@@ -1558,11 +1614,11 @@ class CartService extends BaseService {
      * First check if there is an existing shipping address on the cart if so
      * fetch the entire thing so we can modify the shipping country
      */
-    let shippingAddress = {}
+    let shippingAddress: Partial<Address> = {}
     if (cart.shipping_address_id) {
-      shippingAddress = await addrRepo.findOne({
+      shippingAddress = (await addrRepo.findOne({
         where: { id: cart.shipping_address_id },
-      })
+      })) as Address
     }
 
     /*
@@ -1632,9 +1688,10 @@ class CartService extends BaseService {
         if (d.regions.find(({ id }) => id === regionId)) {
           return d
         }
+        return null
       })
 
-      cart.discounts = newDiscounts.filter((d) => !!d)
+      cart.discounts = newDiscounts.filter(Boolean) as Discount[]
     }
 
     cart.gift_cards = []
@@ -1655,11 +1712,11 @@ class CartService extends BaseService {
   /**
    * Deletes a cart from the database. Completed carts cannot be deleted.
    * @param {string} cartId - the id of the cart to delete
-   * @return {Promise<Cart?>} the deleted cart or undefined if the cart was
+   * @return {Promise<string>} the deleted cart or undefined if the cart was
    *    not found.
    */
-  async delete(cartId) {
-    return this.atomicPhase_(async (manager) => {
+  async delete(cartId: string): Promise<string> {
+    return await this.atomicPhase_(async (manager: EntityManager) => {
       const cart = await this.retrieve(cartId, {
         relations: [
           "items",
@@ -1685,7 +1742,7 @@ class CartService extends BaseService {
       }
 
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
-      return cartRepo.remove(cartId)
+      return cartRepo.remove(cart)
     })
   }
 
@@ -1698,8 +1755,12 @@ class CartService extends BaseService {
    * @param {string} value - value for metadata field.
    * @return {Promise} resolves to the updated result.
    */
-  async setMetadata(cartId, key, value) {
-    return this.atomicPhase_(async (manager) => {
+  async setMetadata(
+    cartId: string,
+    key: string,
+    value: string | number
+  ): Promise<Cart> {
+    return await this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
 
       const validatedId = this.validateId_(cartId)
@@ -1710,7 +1771,7 @@ class CartService extends BaseService {
         )
       }
 
-      const cart = await cartRepo.findOne(validatedId)
+      const cart = (await cartRepo.findOne(validatedId)) as Cart
 
       const existing = cart.metadata || {}
       cart.metadata = {
@@ -1732,8 +1793,8 @@ class CartService extends BaseService {
    * @param {string} key - key for metadata field
    * @return {Promise} resolves to the updated result.
    */
-  async deleteMetadata(cartId, key) {
-    return this.atomicPhase_(async (manager) => {
+  async deleteMetadata(cartId: string, key: string): Promise<Cart> {
+    return this.atomicPhase_(async (manager: EntityManager) => {
       const cartRepo = manager.getCustomRepository(this.cartRepository_)
       const validatedId = this.validateId_(cartId)
 

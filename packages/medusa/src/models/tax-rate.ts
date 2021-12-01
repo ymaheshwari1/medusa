@@ -18,7 +18,7 @@ export class TaxRate {
   @PrimaryColumn()
   id: string
 
-  @Column()
+  @Column({ nullable: true })
   rate: number
 
   @Column({ nullable: true })
