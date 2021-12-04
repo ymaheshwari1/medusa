@@ -43,8 +43,12 @@ export class FilterableCartProps {
 
 // TODO: Probably worth moving to `./line-item` instead
 export type LineItemUpdate = {
-  quantity: number
-  metadata: JSON
+  title?: string
+  unit_price?: number
+  quantity?: number
+  metadata?: object
+  region_id?: string
+  variant_id?: string
 }
 
 class GiftCard {

@@ -4,15 +4,16 @@ import { BaseService } from "medusa-interfaces"
 import { EntityManager } from "typeorm"
 import Redis from "ioredis"
 
-import { UserRepository } from "../repositories/user"
-
 import { TaxLineRepository } from "../repositories/tax-line"
 import { TaxLine } from "../models/tax-line"
 import { Region } from "../models/region"
 import { Cart } from "../models/cart"
 import { Order } from "../models/order"
-import { ITaxService, TaxCalculationLine } from "../interfaces/tax-service"
-import { TaxRate } from "../models/tax-rate"
+import {
+  ITaxService,
+  TaxCalculationContext,
+  TaxCalculationLine,
+} from "../interfaces/tax-service"
 
 import { TaxServiceRate } from "../types/tax-service"
 
@@ -61,7 +62,10 @@ class TaxProviderService extends BaseService {
     return this.container_["systemTaxService"] as ITaxService
   }
 
-  async getTaxLines(order: Cart | Order): Promise<TaxLine[]> {
+  async getTaxLines(
+    order: Cart | Order,
+    calculationContext: TaxCalculationContext
+  ): Promise<TaxLine[]> {
     const calculationLines: TaxCalculationLine[] = await Promise.all(
       order.items.map(async (l) => {
         return {
@@ -77,11 +81,7 @@ class TaxProviderService extends BaseService {
     const taxProvider = this.getTaxProvider(order.region)
     const providerLines = await taxProvider.calculateLineItemTaxes(
       calculationLines,
-      {
-        shippingAddress: order.shipping_address,
-        customer: order.customer,
-        region: order.region,
-      }
+      calculationContext
     )
 
     const taxLineRepo: TaxLineRepository = this.manager_.getCustomRepository(

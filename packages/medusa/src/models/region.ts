@@ -45,6 +45,12 @@ export class Region {
   @Column({ nullable: true })
   tax_code: string
 
+  @Column({ default: true })
+  giftcards_taxable: boolean
+
+  @Column({ default: true })
+  automatic_taxes: boolean
+
   @OneToMany(() => Country, (c) => c.region)
   countries: Country[]
 

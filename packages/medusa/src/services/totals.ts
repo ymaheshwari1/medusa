@@ -2,15 +2,21 @@ import _ from "lodash"
 import { BaseService } from "medusa-interfaces"
 import { MedusaError } from "medusa-core-utils"
 
+import { TaxLine } from "../models/tax-line"
 import { Order } from "../models/order"
 import { Cart } from "../models/cart"
 import { LineItem } from "../models/line-item"
 import { Discount } from "../models/discount"
 import { DiscountRuleType } from "../models/discount-rule"
 
+import TaxProviderService from "./tax-provider"
+import { ITaxCalculationStrategy } from "../strategies/tax-calculation"
+import { TaxCalculationContext } from "../interfaces/tax-service"
+
 import {
   SubtotalOptions,
   LineDiscount,
+  LineAllocationsMap,
   LineDiscountAmount,
 } from "../types/totals"
 
@@ -19,8 +25,14 @@ import {
  * @implements {BaseService}
  */
 class TotalsService extends BaseService {
-  constructor() {
+  private taxProviderService_: TaxProviderService
+  private taxCalculationStrategy_: ITaxCalculationStrategy
+
+  constructor({ taxProviderService, taxCalculationStrategy }) {
     super()
+
+    this.taxProviderService_ = taxProviderService
+    this.taxCalculationStrategy_ = taxCalculationStrategy
   }
 
   /**
@@ -102,18 +114,99 @@ class TotalsService extends BaseService {
    * @return {int} tax total
    */
   async getTaxTotal(object: Cart | Order): Promise<number> {
-    const subtotal = this.getSubtotal(object)
-    const shippingTotal = this.getShippingTotal(object)
-    const discountTotal = this.getDiscountTotal(object)
-    const giftCardTotal = this.getGiftCardTotal(object)
-    const tax_rate =
-      typeof object.tax_rate !== "undefined"
-        ? object.tax_rate
-        : object.region.tax_rate
-    return this.rounded(
-      (subtotal - discountTotal - giftCardTotal + shippingTotal) *
-        (tax_rate / 100)
+    // const subtotal = this.getSubtotal(object)
+    // const shippingTotal = this.getShippingTotal(object)
+    // const discountTotal = this.getDiscountTotal(object)
+    // const giftCardTotal = this.getGiftCardTotal(object)
+
+    const allocationMap = this.getAllocationMap(object)
+    const calculationContext: TaxCalculationContext = {
+      shipping_address: object.shipping_address,
+      customer: object.customer,
+      region: object.region,
+      allocation_map: allocationMap,
+    }
+
+    let taxLines: TaxLine[]
+    if (object instanceof Order) {
+      taxLines = object.items.flatMap((li) => {
+        return li.tax_lines
+      })
+    } else {
+      taxLines = await this.taxProviderService_.getTaxLines(
+        object,
+        calculationContext
+      )
+    }
+
+    const toReturn = await this.taxCalculationStrategy_.calculate(
+      object.items,
+      taxLines,
+      calculationContext
     )
+
+    return this.rounded(toReturn)
+  }
+
+  getAllocationMap(order: Cart | Order): LineAllocationsMap {
+    let lineDiscounts: LineDiscountAmount[] = []
+
+    const discount = order.discounts.find(
+      ({ rule }) => rule.type !== "free_shipping"
+    )
+    if (discount) {
+      lineDiscounts = this.getLineDiscounts(order, discount)
+    }
+
+    let lineGiftCards: LineDiscountAmount[] = []
+    if (order.gift_cards && order.gift_cards.length) {
+      const subtotal = this.getSubtotal(order)
+      const giftCardTotal = this.getGiftCardTotal(order)
+
+      // If the fixed discount exceeds the subtotal we should
+      // calculate a 100% discount
+      const nominator = Math.min(giftCardTotal, subtotal)
+      const percentage = nominator / subtotal
+
+      lineGiftCards = order.items.map((l) => {
+        return {
+          item: l,
+          amount: l.unit_price * l.quantity * percentage,
+        }
+      })
+    }
+
+    const allocationMap: LineAllocationsMap = {}
+
+    for (const ld of lineDiscounts) {
+      if (allocationMap[ld.item.id]) {
+        allocationMap[ld.item.id].discount = {
+          amount: ld.amount,
+        }
+      } else {
+        allocationMap[ld.item.id] = {
+          discount: {
+            amount: ld.amount,
+          },
+        }
+      }
+    }
+
+    for (const lgc of lineGiftCards) {
+      if (allocationMap[lgc.item.id]) {
+        allocationMap[lgc.item.id].gift_card = {
+          amount: lgc.amount,
+        }
+      } else {
+        allocationMap[lgc.item.id] = {
+          discount: {
+            amount: lgc.amount,
+          },
+        }
+      }
+    }
+
+    return allocationMap
   }
 
   getRefundedTotal(object: Order): number {
@@ -128,9 +221,8 @@ class TotalsService extends BaseService {
   getLineItemRefund(object: Cart | Order, lineItem: LineItem): number {
     const { discounts } = object
     const tax_rate =
-      typeof object.tax_rate !== "undefined"
-        ? object.tax_rate
-        : object.region.tax_rate
+      "tax_rate" in object ? object.tax_rate : object.region.tax_rate
+
     const taxRate = (tax_rate || 0) / 100
 
     const discount = discounts.find(({ rule }) => rule.type !== "free_shipping")
@@ -142,7 +234,7 @@ class TotalsService extends BaseService {
     const lineDiscounts = this.getLineDiscounts(object, discount)
     const discountedLine = lineDiscounts.find(
       (line) => line.item.id === lineItem.id
-    )
+    ) as LineDiscountAmount
 
     const discountAmount =
       (discountedLine.amount / discountedLine.item.quantity) * lineItem.quantity

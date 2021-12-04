@@ -1320,7 +1320,8 @@ class CartService extends BaseService {
 
       const cartId =
         typeof cartOrCartId === `string` ? cartOrCartId : cartOrCartId.id
-      const cart = (await this.retrieve(cartId, {
+
+      const cart = await this.retrieve(cartId, {
         select: [
           "gift_card_total",
           "subtotal",
@@ -1342,9 +1343,16 @@ class CartService extends BaseService {
           "payment_sessions",
           "customer",
         ],
-      })) as TotaledCart
+      })
 
       const region = cart.region
+
+      if (typeof cart.total === "undefined") {
+        throw new MedusaError(
+          MedusaError.Types.UNEXPECTED_STATE,
+          "cart.total should be defined"
+        )
+      }
 
       // If there are existing payment sessions ensure that these are up to date
       const seen: string[] = []
