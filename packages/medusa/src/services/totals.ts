@@ -10,7 +10,7 @@ import { Discount } from "../models/discount"
 import { DiscountRuleType } from "../models/discount-rule"
 
 import TaxProviderService from "./tax-provider"
-import { ITaxCalculationStrategy } from "../strategies/tax-calculation"
+import { ITaxCalculationStrategy } from "../interfaces/tax-calculation-strategy"
 import { TaxCalculationContext } from "../interfaces/tax-service"
 
 import {

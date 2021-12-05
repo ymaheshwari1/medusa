@@ -1,14 +1,7 @@
 import { LineItem } from "../models/line-item"
 import { TaxLine } from "../models/tax-line"
 import { TaxCalculationContext } from "../interfaces/tax-service"
-
-export interface ITaxCalculationStrategy {
-  calculate(
-    items: LineItem[],
-    taxLines: TaxLine[],
-    calculationContext: TaxCalculationContext
-  ): Promise<number>
-}
+import { ITaxCalculationStrategy } from "../interfaces/tax-calculation-strategy"
 
 class TaxCalculationStrategy implements ITaxCalculationStrategy {
   async calculate(
@@ -28,13 +21,16 @@ class TaxCalculationStrategy implements ITaxCalculationStrategy {
           (allocations.gift_card && allocations.gift_card.amount) || 0
       }
 
+      taxableAmount -=
+        (allocations.discount && allocations.discount.amount) || 0
+
       const lineRates = taxLines.filter((tl) => tl.item_id === i.id)
       for (const lineRate of lineRates) {
         result += taxableAmount * lineRate.rate
       }
     }
 
-    return result
+    return Math.round(result)
   }
 }
 
